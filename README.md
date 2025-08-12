@@ -1,41 +1,67 @@
-## Example Summary
+# 2025年电赛E题
 
-Empty project using DriverLib.
-This example shows a basic empty project using DriverLib with just main file
-and SysConfig initialization.
+## 一、前言
 
-## Peripherals & Pin Assignments
+刚开始我们信心满满地挑战这题，然后很快就发现一个又一个棘手的问题
 
-| Peripheral | Pin | Function |
-| --- | --- | --- |
-| SYSCTL |  |  |
-| DEBUGSS | PA20 | Debug Clock |
-| DEBUGSS | PA19 | Debug Data In Out |
+1.小车上搭载云台，但是限制尺寸，同时精度需求极高
 
-## BoosterPacks, Board Resources & Jumper Settings
+也就是说，云台必须使用步进电机，这导致车的重量进一步增大，同时控制难度上升，步进电机的线长有限，云台转动的最大圈数固定，否则会扭断接线。而我们没有提前准备电刷滑环，因此一开始的想法是，将所有主控全部随着云台转动，这有样能保证云台随意转动且不会绞线，但同时，由于车轮的电机线必须固定，因此这个方案也被否决。
 
-Visit [LP_MSPM0G3507](https://www.ti.com/tool/LP-MSPM0G3507) for LaunchPad information, including user guide and hardware files.
+最终方案：电机，主控板，驱动板等固定在车头，树莓派，激光笔，摄像头放在云台上，对云台进行限幅。而云台的x轴（水平方向）通过1：4的齿轮组传动，可以提高x轴的精度（但是也存在回程差的问题）
 
-| Pin | Peripheral | Function | LaunchPad Pin | LaunchPad Settings |
-| --- | --- | --- | --- | --- |
-| PA20 | DEBUGSS | SWCLK | N/A | <ul><li>PA20 is used by SWD during debugging<br><ul><li>`J101 15:16 ON` Connect to XDS-110 SWCLK while debugging<br><li>`J101 15:16 OFF` Disconnect from XDS-110 SWCLK if using pin in application</ul></ul> |
-| PA19 | DEBUGSS | SWDIO | N/A | <ul><li>PA19 is used by SWD during debugging<br><ul><li>`J101 13:14 ON` Connect to XDS-110 SWDIO while debugging<br><li>`J101 13:14 OFF` Disconnect from XDS-110 SWDIO if using pin in application</ul></ul> |
+2.小车&云台，驱动是否分开？
 
-### Device Migration Recommendations
-This project was developed for a superset device included in the LP_MSPM0G3507 LaunchPad. Please
-visit the [CCS User's Guide](https://software-dl.ti.com/msp430/esd/MSPM0-SDK/latest/docs/english/tools/ccs_ide_guide/doc_guide/doc_guide-srcs/ccs_ide_guide.html#sysconfig-project-migration)
-for information about migrating to other MSPM0 devices.
+小车与云台其实是两套相对独立的程序（也可以不那么独立），使用两个主控控制的好处是，程序简单，小车部分直接使用mspm0g3507开发板，云台部分可以使用stm32f103c8t6（考虑到大部分电赛培训均使用stm32，因此可以多人分开合作），小车只负责循迹，云台只负责打靶。
 
-### Low-Power Recommendations
-TI recommends to terminate unused pins by setting the corresponding functions to
-GPIO and configure the pins to output low or input with internal
-pullup/pulldown resistor.
+但是，双主控也会带来问题，包括任务的执行，需要加入通信（蓝牙/串口）去通知另外一块主控，该干什么事情，或者，另一套办法是，使用两套独立的输入设备（按键，oled，串口屏），分别为两个主控设置任务。
 
-SysConfig allows developers to easily configure unused pins by selecting **Board**→**Configure Unused Pins**.
+对比之下，单主控优势更大，能够完成所有任务，只需要一套输入设备，而且能够减少体积（最重要的）
 
-For more information about jumper configuration to achieve low-power using the
-MSPM0 LaunchPad, please visit the [LP-MSPM0G3507 User's Guide](https://www.ti.com/lit/slau873).
+因此我们选择单主控，只使用一块mspm0g3507评估板完成这道题。
 
-## Example Usage
+3.小车的控制，并非“能循迹”那么简单
 
-Compile, load and run the example.
+即使你的云台静止闭环调的再好，由于小车速度的限制（一圈20s），就注定需要通过添加前馈/闭环来抵消小车运动对云台追踪带来的副作用，而小车运动越平缓，这部分的需求就越低（越好调），因此，让小车能够缓启动/s形加减速/缓刹车就很有必要，而由于搭载了云台，小车的重量非常大，在速度降低到一定程度后，就会因为无法克服摩擦力导致保持静止，因此，除去起点/终点之外刹车/启动的最低速度不应该为0 。
+
+4.一次失败的经历
+
+四天三夜的电赛，带来的不仅仅是紧张感，还有疲惫感，在熬夜奋战后，我们的精神都已经出现极大的疲劳，因此在封箱时甚至没有准备备用开发板，最后在测评时，开发板与树莓派通信的串口坏了，最后遗憾离场：（
+
+## 二、程序内容解析
+
+master分支下是整个工程的文件，除去settings，debug等IDE生成的文件外，我添加了三个文件夹
+
+Core：内核文件(来自ellu)
+
+> modules.h 用于定义各个模块的时基函数, 必须编译
+>
+> macro.h 辅助宏文件模块, 必须编译
+>
+> perf_counter.c/h 代替systick提供高精度ns级时基和性能测试模块, 强烈推荐编译
+>
+> scheduler.c/h 任务调度器模块, 推荐编译
+
+Modules：驱动文件，包括直流电机，步进电机等驱动
+
+>gray_sensor.c/h 八路数字灰度传感器模块
+>
+>log.c/h 日志模块，依赖uart.c
+>
+>motor.c/h 直流电机驱动模块，包括直流电机驱动，软件模拟编码器，里程计等
+>
+>pid.c/h 高级PID控制器模块，来自ellu
+>
+>stepper.c/h 简单步进电机控制模块
+>
+>uart.c/h 串口模块
+
+APP:顶层任务文件，用于实现本题
+
+>ptz.c/h 云台控制模块，包含云台闭环打靶速度环任务
+>
+>Tracking_car.c/h 小车循迹模块，缓刹车/缓启动/s形加减速等尚未实现
+
+empty.c 即main.c 我使用空白工程模板后未修改
+
+empty.syscfg 工程配置文件
